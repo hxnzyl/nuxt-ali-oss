@@ -1,2 +1,3 @@
-# nuxt-ali-oss
-Nuxt JS&amp;Ali OSS Module
+# nuxt-jwt
+
+Nuxt JS JWT module~

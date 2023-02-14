@@ -1,0 +1,277 @@
+import AliOSS from 'ali-oss'
+import defu from 'defu'
+import mime from 'mime'
+
+import crypto from 'ali-oss/shims/crypto/crypto'
+import { Buffer } from 'buffer'
+
+// import MediaInfoFactory from 'mediainfo.js'
+
+const ClientOptions = <%= JSON.stringify(options.client, null, 4) %>
+
+const UploadOptions = <%= JSON.stringify(options.upload, null, 4) %>
+
+function combineFileDirectory(filePath, fileObj) {
+	let date = new Date()
+	let year = date.getFullYear().toString()
+	let month = (date.getMonth() + 1).toString().padStart(2, '0')
+	let day = date.getDate().toString().padStart(2, '0')
+	//文件名 => 文件名base64 - 时间戳
+	let { name } = fileObj
+	let path = filePath.includes(name) ? filePath.replace(name, Buffer.from(name, 'utf8').toString('base64') + '-' + Date.now()) : filePath
+	let ext = path.includes('.') ? '' : '.' + name.split('.').pop()
+	return year + month + day + '/' + path + ext
+}
+
+function combineUploadOptions(options) {
+	if (!options) return { headers: UploadOptions.headers }
+	let customValue = options.callback && options.callback.customValue
+	//自定义参数自动合并到body
+	if (customValue)
+		options.callback.body = Object.keys(customValue)
+			.reduce((vars, key) => vars.concat(key + '=${x:' + key + '}'), [UploadOptions.callback.body || '', options.callback.body || ''])
+			.filter((v) => v !== '')
+			.join('&')
+	return defu(options, UploadOptions)
+}
+
+async function createMediaInfoInstance(alioss) {
+	if (!alioss.mediaInfoInstance)
+		alioss.mediaInfoInstance = await MediaInfo({
+			format: 'object',
+			locateFile: (prefix, path) => path + prefix
+		})
+	return alioss.mediaInfoInstance
+}
+
+function createMediaInfoGetSize(alioss, fileObj) {
+	return () => fileObj.size
+}
+
+function createMediaInfoReadChunk(alioss, fileObj, onProgress) {
+	return (chunkSize, offset) =>
+		new Promise((resolve, reject) => {
+			const reader = new FileReader()
+			if (typeof onProgress === 'function') reader.onprogress = (event) => onProgress(event.loaded / event.total)
+			reader.onload = (event) => (event.target.error ? reject(event.target.error) : resolve(new Uint8Array(event.target.result)))
+			reader.readAsArrayBuffer(fileObj.slice(offset, offset + chunkSize))
+			alioss.mediaInfoReader = reader
+		})
+}
+
+// function loadVideo(src) {
+// 	return new Promise((resolve, reject) => {
+// 		const video = document.createElement('video')
+// 		video.src = src
+// 		video.preload = 'auto'
+// 		video.crossOrigin = 'Anonymous'
+// 		video.addEventListener('error', (error) => reject(error))
+// 		video.addEventListener('loadedmetadata', () => {})
+// 		video.addEventListener('canplay', () => {
+// 			const canvas = document.createElement('canvas')
+// 			canvas.width = width
+// 			canvas.height = height
+// 			const ctx = canvas.getContext('2d')
+// 			ctx.drawImage(video, 0, 0, width, height)
+// 			const saturation = avgSaturation(ctx.getImageData(0, 0, canvas.width, canvas.height).data)
+// 			const dataURL = canvas.toDataURL('image/jpg')
+// 			resolve({ dataURL, saturation })
+// 		})
+// 	})
+// }
+
+// function getImageAvgSaturation(data) {
+// 	const rgbaList = bin2rgba(data)
+// 	const hslList = rgbaList.map((item) => rgb2hsl(item.r, item.g, item.b))
+// 	return hslList.reduce((total, curr) => total + curr.s, 0) / hslList.length
+// }
+
+// function rgb2hsl(r, g, b) {
+// 	r = r / 255
+// 	g = g / 255
+// 	b = b / 255
+// 	var min = Math.min(r, g, b)
+// 	var max = Math.max(r, g, b)
+// 	var l = (min + max) / 2
+// 	var difference = max - min
+// 	var h, s, l
+// 	if (max == min) {
+// 		h = 0
+// 		s = 0
+// 	} else {
+// 		s = l > 0.5 ? difference / (2.0 - max - min) : difference / (max + min)
+// 		switch (max) {
+// 			case r:
+// 				h = (g - b) / difference + (g < b ? 6 : 0)
+// 				break
+// 			case g:
+// 				h = 2.0 + (b - r) / difference
+// 				break
+// 			case b:
+// 				h = 4.0 + (r - g) / difference
+// 				break
+// 		}
+// 		h = Math.round(h * 60)
+// 	}
+// 	s = Math.round(s * 100)
+// 	l = Math.round(l * 100)
+// 	return { h, s, l }
+// }
+
+// function bin2rgba(data) {
+// 	const rgbas = []
+// 	for (let i = 0, l = data.length; i < l; i++) {
+// 		if (i % 4 === 0) {
+// 			rgbas.push({ r: data[i] })
+// 		} else {
+// 			const rgba = rgbas[rgbas.length - 1]
+// 			if (i % 4 === 1) {
+// 				rgba.g = data[i]
+// 			} else if (i % 4 === 2) {
+// 				rgba.b = data[i]
+// 			} else if (i % 4 === 3) {
+// 				rgba.a = data[i]
+// 			}
+// 		}
+// 	}
+// 	return rgbas
+// }
+
+const aliossExtra = {
+	/**
+	 * 创建实例
+	 *
+	 * @param {Object} options
+	 * @returns
+	 */
+	create(options) {
+		return createAliOSSInstance(defu(options, ClientOptions))
+	},
+	/**
+	 * 获取字符串MD5值
+	 *
+	 * @param {String} str 字符串
+	 * @returns {Promise}
+	 */
+	hexMd5(str) {
+		return crypto.createHash('md5').update(Buffer.from(str, 'utf8')).digest('hex')
+	},
+	/**
+	 * 销毁正在进行中的任务
+	 */
+	destroy() {
+		//关闭获取文件信息任务
+		if (this.mediaInfoReader) this.mediaInfoReader.abort(), (this.mediaInfoReader = null)
+		//关闭获取文件信息任务
+		if (this.mediaInfoInstance) this.mediaInfoInstance.close(), (this.mediaInfoInstance = null)
+		//取消所有任务
+		this.cancel()
+	},
+	/**
+	 * 获取媒体文件信息
+	 * 由于mediainfo.js在nuxt中引入较为麻烦，因为请在局部或全局导入mediainfo.min.js
+	 *
+	 * @param {File} fileObj 文件对象
+	 * @param {Function} onProgress 进度
+	 * @returns {Promise}
+	 */
+	async getMediaInfo(fileObj, onProgress) {
+		let result = await (
+			await createMediaInfoInstance(this)
+		).analyzeData(createMediaInfoGetSize(this, fileObj), createMediaInfoReadChunk(this, fileObj, onProgress))
+		return result.media ? result.media.track : null
+	},
+	/**
+	 * 是否为媒体文件（视频，音频）
+	 *
+	 * @param {File} file 文件
+	 * @returns {Promise}
+	 */
+	isMediaFile(fileObj) {
+		let type = mime.getType(fileObj.name)
+		return type && (type.includes('video') || type.includes('audio'))
+	},
+	/**
+	 * 是否为视频文件
+	 *
+	 * @param {File} fileObj 文件
+	 * @returns {Promise}
+	 */
+	isVideoFile(fileObj) {
+		return (mime.getType(fileObj.name) || '').includes('video')
+	},
+	/**
+	 * 是否为音频文件
+	 *
+	 * @param {File} fileObj 文件
+	 * @returns {Promise}
+	 */
+	isAudioFile(fileObj) {
+		return (mime.getType(fileObj.name) || '').includes('audio')
+	},
+	/**
+	 * 获取链接地址上的文件名
+	 *
+	 * @param {String} url 链接
+	 * @returns {String}
+	 */
+	getFileName(url) {
+		return Buffer.from(url.split('/').pop().split('-').shift(), 'base64').toString()
+	},
+	/**
+	 * 简单上传（默认无回调）
+	 * @link https://help.aliyun.com/document_detail/383950.html
+	 *
+	 * @param {String} filePath 文件路径
+	 * @param {File} fileObj 文件对象
+	 * @param {Object} options 参数
+	 * @returns {Promise}
+	 */
+	async simpleUpload(filePath, fileObj, options) {
+		let path = combineFileDirectory(filePath, fileObj)
+		await this.put(path, fileObj, combineUploadOptions(options))
+		return this.options.domain + path
+	},
+	/**
+	 * 分片上传（默认无回调）
+	 * @link https://help.aliyun.com/document_detail/383952.html
+	 *
+	 * @param {String} filePath 文件路径
+	 * @param {File} fileObj 文件对象
+	 * @param {Object} options 参数
+	 * @returns {Promise}
+	 */
+	async multipartUpload(filePath, fileObj, options) {
+		return await this._multipartUpload(combineFileDirectory(filePath, fileObj), fileObj, combineUploadOptions(options))
+	}
+}
+
+const extendAliOSSInstance = (alioss) => {
+	for (const key in aliossExtra) {
+		if (alioss[key]) alioss[`_${key}`] = alioss[key]
+		alioss[key] = aliossExtra[key].bind(alioss)
+	}
+}
+
+const createAliOSSInstance = (aliossOptions) => {
+	// Create new alioss instance
+	const alioss = new AliOSS(aliossOptions)
+	alioss.mediaInfoReader = null
+	alioss.mediaInfoInstance = null
+
+	// Extend alioss proto
+	extendAliOSSInstance(alioss)
+
+	return alioss
+}
+
+export default (ctx, inject) => {
+	// runtimeConfig
+	const runtimeConfig = (ctx.$config && ctx.$config.alioss) || {}
+	// Combine Options
+	const options = defu(runtimeConfig.client || {}, ClientOptions)
+    // Create Instance
+	const alioss = createAliOSSInstance(options)
+	ctx.$alioss = alioss
+	inject('alioss', alioss)
+}

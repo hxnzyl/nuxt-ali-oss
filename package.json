@@ -1,0 +1,24 @@
+{
+	"name": "nuxt-ali-oss",
+	"version": "1.0.0",
+	"description": "Nuxt JS ali-oss module~",
+	"main": "module.js",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hxnzyl/nuxt-ali-oss.git"
+	},
+	"keywords": [
+		"nuxt-ali-oss"
+	],
+	"author": "OWen <379368435@qq.com>",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/hxnzyl/nuxt-ali-oss/issues"
+	},
+	"homepage": "https://github.com/hxnzyl/nuxt-ali-oss#readme",
+	"dependencies": {
+		"ali-oss": "^6.17.1",
+		"consola": "^2.15.3",
+		"defu": "^6.1.2"
+	}
+}
