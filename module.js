@@ -2,16 +2,16 @@ const { resolve } = require('path')
 const consola = require('consola')
 const { defu } = require('defu')
 
-const logger = consola.withScope('nuxt:alioss')
+const meta = require('./package.json')
 
-function aliossModule(_moduleOptions) {
-	const { nuxt } = this
+module.exports = function aliossModule(_moduleOptions) {
+	const { runtimeConfig, alioss = {} } = this.options
 
 	// Combine options
 	const moduleOptions = {
-		...nuxt.options.alioss,
+		...alioss,
 		..._moduleOptions,
-		...(nuxt.options.runtimeConfig && nuxt.options.runtimeConfig.alioss)
+		...(runtimeConfig && runtimeConfig.alioss)
 	}
 
 	// Upload headers
@@ -61,8 +61,7 @@ function aliossModule(_moduleOptions) {
 		options
 	})
 
-	logger.debug(`region: ${options.client.region}`)
-	logger.debug(`bucket: ${options.client.bucket}`)
+	consola.info(meta.name + ': v' + meta.version)
 }
 
-module.exports = aliossModule
+module.exports.meta = meta
