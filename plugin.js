@@ -7,9 +7,7 @@ import { Buffer } from 'buffer'
 
 // import MediaInfoFactory from 'mediainfo.js'
 
-const ClientOptions = <%= JSON.stringify(options.client, null, 4) %>
-
-const UploadOptions = <%= JSON.stringify(options.upload, null, 4) %>
+const pluginOptions = JSON.parse('<%= JSON.stringify(options) %>')
 
 function combineFileDirectory(filePath, fileObj) {
 	let date = new Date()
@@ -18,44 +16,58 @@ function combineFileDirectory(filePath, fileObj) {
 	let day = date.getDate().toString().padStart(2, '0')
 	//文件名 => 文件名base64 - 时间戳
 	let { name } = fileObj
-	let path = filePath.includes(name) ? filePath.replace(name, Buffer.from(name, 'utf8').toString('base64') + '-' + Date.now()) : filePath
+	let path = filePath.includes(name)
+		? filePath.replace(name, Buffer.from(name, 'utf8').toString('base64') + '-' + Date.now())
+		: filePath
 	let ext = path.includes('.') ? '' : '.' + name.split('.').pop()
 	return year + month + day + '/' + path + ext
 }
 
-function combineUploadOptions(options) {
-	if (!options) return { headers: UploadOptions.headers }
-	let customValue = options.callback && options.callback.customValue
-	//自定义参数自动合并到body
-	if (customValue)
-		options.callback.body = Object.keys(customValue)
-			.reduce((vars, key) => vars.concat(key + '=${x:' + key + '}'), [UploadOptions.callback.body || '', options.callback.body || ''])
-			.filter((v) => v !== '')
-			.join('&')
-	return defu(options, UploadOptions)
+function combineUploadOptions(accessType, uploadOptions) {
+	if (!uploadOptions) {
+		let options = defu({}, pluginOptions.upload)
+		//公有bucket默认没有callback
+		if (accessType === 'public') delete options.callback
+		return options
+	} else {
+		let callback = uploadOptions.callback
+		let customValue = callback && callback.customValue
+		//自定义参数自动合并到body
+		if (customValue && typeof customValue === 'object') {
+			let body = [pluginOptions.upload.callback.body || '', callback.body || ''].filter((v) => v !== '')
+			callback.body = Object.keys(customValue)
+				.reduce((vars, key) => vars.concat(key + '=${x:' + key + '}'), body)
+				.join('&')
+		}
+		let options = defu(uploadOptions, pluginOptions.upload)
+		//公有bucket默认没有callback
+		if (!callback && accessType === 'public') delete options.callback
+		return options
+	}
 }
 
-async function createMediaInfoInstance(alioss) {
-	if (!alioss.mediaInfoInstance)
-		alioss.mediaInfoInstance = await MediaInfo({
+async function createMediaInfoInstance(aliossInstance) {
+	if (!aliossInstance.mediaInfoInstance)
+		aliossInstance.mediaInfoInstance = await MediaInfo({
 			format: 'object',
 			locateFile: (prefix, path) => path + prefix
 		})
-	return alioss.mediaInfoInstance
+	return aliossInstance.mediaInfoInstance
 }
 
-function createMediaInfoGetSize(alioss, fileObj) {
+function createMediaInfoGetSize(aliossInstance, fileObj) {
 	return () => fileObj.size
 }
 
-function createMediaInfoReadChunk(alioss, fileObj, onProgress) {
+function createMediaInfoReadChunk(aliossInstance, fileObj, onProgress) {
 	return (chunkSize, offset) =>
 		new Promise((resolve, reject) => {
 			const reader = new FileReader()
 			if (typeof onProgress === 'function') reader.onprogress = (event) => onProgress(event.loaded / event.total)
-			reader.onload = (event) => (event.target.error ? reject(event.target.error) : resolve(new Uint8Array(event.target.result)))
+			reader.onload = (event) =>
+				event.target.error ? reject(event.target.error) : resolve(new Uint8Array(event.target.result))
 			reader.readAsArrayBuffer(fileObj.slice(offset, offset + chunkSize))
-			alioss.mediaInfoReader = reader
+			aliossInstance.mediaInfoReader = reader
 		})
 }
 
@@ -137,16 +149,13 @@ function createMediaInfoReadChunk(alioss, fileObj, onProgress) {
 // 	return rgbas
 // }
 
-const aliossExtra = {
-	/**
-	 * 创建实例
-	 *
-	 * @param {Object} options
-	 * @returns
-	 */
-	create(options) {
-		return createAliOSSInstance(defu(options, ClientOptions))
-	},
+function AliOSSPlugin(accessType) {
+	this.mediaInfoReader = null
+	this.mediaInfoInstance = null
+	this.bucketAccessType = accessType
+}
+
+AliOSSPlugin.prototype = {
 	/**
 	 * 获取字符串MD5值
 	 *
@@ -155,17 +164,6 @@ const aliossExtra = {
 	 */
 	hexMd5(str) {
 		return crypto.createHash('md5').update(Buffer.from(str, 'utf8')).digest('hex')
-	},
-	/**
-	 * 销毁正在进行中的任务
-	 */
-	destroy() {
-		//关闭获取文件信息任务
-		if (this.mediaInfoReader) this.mediaInfoReader.abort(), (this.mediaInfoReader = null)
-		//关闭获取文件信息任务
-		if (this.mediaInfoInstance) this.mediaInfoInstance.close(), (this.mediaInfoInstance = null)
-		//取消所有任务
-		this.cancel()
 	},
 	/**
 	 * 获取媒体文件信息
@@ -219,17 +217,40 @@ const aliossExtra = {
 		return Buffer.from(url.split('/').pop().split('-').shift(), 'base64').toString()
 	},
 	/**
+	 * 创建实例
+	 *
+	 * @param {Object} options
+	 * @returns
+	 */
+	create(options) {
+		return createAliOSSInstance(this.bucketAccessType, options)
+	},
+	/**
+	 * 销毁正在进行中的任务
+	 */
+	destroy() {
+		//关闭获取文件信息任务
+		if (this.mediaInfoReader) this.mediaInfoReader.abort(), (this.mediaInfoReader = null)
+		//关闭获取文件信息任务
+		if (this.mediaInfoInstance) this.mediaInfoInstance.close(), (this.mediaInfoInstance = null)
+		//取消所有任务
+		this.cancel()
+	},
+	/**
 	 * 简单上传（默认无回调）
 	 * @link https://help.aliyun.com/document_detail/383950.html
 	 *
 	 * @param {String} filePath 文件路径
 	 * @param {File} fileObj 文件对象
 	 * @param {Object} options 参数
+	 * @param {String} accessType 访问类型
 	 * @returns {Promise}
 	 */
 	async simpleUpload(filePath, fileObj, options) {
 		let path = combineFileDirectory(filePath, fileObj)
-		await this.put(path, fileObj, combineUploadOptions(options))
+		let opts = combineUploadOptions(this.bucketAccessType, options)
+		// console.log('####simpleUpload', this.options, opts)
+		await this.put(path, fileObj, opts)
 		return this.options.domain + path
 	},
 	/**
@@ -242,36 +263,40 @@ const aliossExtra = {
 	 * @returns {Promise}
 	 */
 	async multipartUpload(filePath, fileObj, options) {
-		return await this._multipartUpload(combineFileDirectory(filePath, fileObj), fileObj, combineUploadOptions(options))
+		let path = combineFileDirectory(filePath, fileObj)
+		let opts = combineUploadOptions(this.bucketAccessType, options)
+		// console.log('####multipartUpload', this.options, opts)
+		return await this._multipartUpload(path, fileObj, opts)
 	}
 }
 
-const extendAliOSSInstance = (alioss) => {
-	for (const key in aliossExtra) {
-		if (alioss[key]) alioss[`_${key}`] = alioss[key]
-		alioss[key] = aliossExtra[key].bind(alioss)
+const extendAliOSSInstance = (target, dest) => {
+	for (const key in dest) {
+		if (target[key]) target[`_${key}`] = target[key]
+		target[key] = typeof dest[key] === 'function' ? dest[key] : dest[key]
 	}
 }
 
-const createAliOSSInstance = (aliossOptions) => {
+const createAliOSSInstance = (accessType, aliossOptions) => {
 	// Create new alioss instance
-	const alioss = new AliOSS(aliossOptions)
-	alioss.mediaInfoReader = null
-	alioss.mediaInfoInstance = null
+	const alioss = new AliOSS(defu(aliossOptions, pluginOptions[accessType]))
+
+	// Create new alioss plugin
+	const plugin = new AliOSSPlugin(accessType)
 
 	// Extend alioss proto
-	extendAliOSSInstance(alioss)
+	extendAliOSSInstance(alioss, plugin)
 
 	return alioss
 }
 
 export default (ctx, inject) => {
-	// runtimeConfig
-	const runtimeConfig = (ctx.$config && ctx.$config.alioss) || {}
-	// Combine Options
-	const options = defu(runtimeConfig.client || {}, ClientOptions)
-    // Create Instance
-	const alioss = createAliOSSInstance(options)
+	//public
+	const alioss = createAliOSSInstance('public', pluginOptions.client)
 	ctx.$alioss = alioss
 	inject('alioss', alioss)
+	//private
+	const alvoss = createAliOSSInstance('private', pluginOptions.client)
+	ctx.$alvoss = alvoss
+	inject('alvoss', alvoss)
 }
