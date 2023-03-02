@@ -214,7 +214,7 @@ AliOSSPlugin.prototype = {
 	 * @returns {String}
 	 */
 	getFileName(url) {
-		return Buffer.from(url.split('/').pop().split('-').shift(), 'base64').toString()
+		return Buffer.from(decodeURIComponent(url.split('/').pop().split('-').shift()), 'base64').toString()
 	},
 	/**
 	 * 创建实例
