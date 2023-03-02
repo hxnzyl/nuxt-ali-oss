@@ -251,7 +251,7 @@ AliOSSPlugin.prototype = {
 		let opts = combineUploadOptions(this.bucketAccessType, options)
 		// console.log('####simpleUpload', this.options, opts)
 		await this.put(path, fileObj, opts)
-		return this.options.domain + path
+		return this.options.domain + encodeURIComponent(path)
 	},
 	/**
 	 * 分片上传（默认无回调）
