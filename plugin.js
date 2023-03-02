@@ -17,7 +17,7 @@ function combineFileDirectory(filePath, fileObj) {
 	//文件名 => 文件名base64 - 时间戳
 	let { name } = fileObj
 	let path = filePath.includes(name)
-		? filePath.replace(name, Buffer.from(name, 'utf8').toString('base64') + '-' + Date.now())
+		? filePath.replace(name, encodeURIComponent(Buffer.from(name, 'utf8').toString('base64')) + '-' + Date.now())
 		: filePath
 	let ext = path.includes('.') ? '' : '.' + name.split('.').pop()
 	return year + month + day + '/' + path + ext
@@ -251,7 +251,7 @@ AliOSSPlugin.prototype = {
 		let opts = combineUploadOptions(this.bucketAccessType, options)
 		// console.log('####simpleUpload', this.options, opts)
 		await this.put(path, fileObj, opts)
-		return this.options.domain + encodeURIComponent(path)
+		return this.options.domain + path
 	},
 	/**
 	 * 分片上传（默认无回调）
