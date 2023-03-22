@@ -5,6 +5,8 @@ import mime from 'mime'
 import crypto from 'ali-oss/shims/crypto/crypto'
 import { Buffer } from 'buffer'
 
+import base64js from 'base64-js'
+
 // import MediaInfoFactory from 'mediainfo.js'
 
 const pluginOptions = JSON.parse('<%= JSON.stringify(options) %>')
@@ -71,87 +73,10 @@ function createMediaInfoReadChunk(aliossInstance, fileObj, onProgress) {
 		})
 }
 
-// function loadVideo(src) {
-// 	return new Promise((resolve, reject) => {
-// 		const video = document.createElement('video')
-// 		video.src = src
-// 		video.preload = 'auto'
-// 		video.crossOrigin = 'Anonymous'
-// 		video.addEventListener('error', (error) => reject(error))
-// 		video.addEventListener('loadedmetadata', () => {})
-// 		video.addEventListener('canplay', () => {
-// 			const canvas = document.createElement('canvas')
-// 			canvas.width = width
-// 			canvas.height = height
-// 			const ctx = canvas.getContext('2d')
-// 			ctx.drawImage(video, 0, 0, width, height)
-// 			const saturation = avgSaturation(ctx.getImageData(0, 0, canvas.width, canvas.height).data)
-// 			const dataURL = canvas.toDataURL('image/jpg')
-// 			resolve({ dataURL, saturation })
-// 		})
-// 	})
-// }
-
-// function getImageAvgSaturation(data) {
-// 	const rgbaList = bin2rgba(data)
-// 	const hslList = rgbaList.map((item) => rgb2hsl(item.r, item.g, item.b))
-// 	return hslList.reduce((total, curr) => total + curr.s, 0) / hslList.length
-// }
-
-// function rgb2hsl(r, g, b) {
-// 	r = r / 255
-// 	g = g / 255
-// 	b = b / 255
-// 	var min = Math.min(r, g, b)
-// 	var max = Math.max(r, g, b)
-// 	var l = (min + max) / 2
-// 	var difference = max - min
-// 	var h, s, l
-// 	if (max == min) {
-// 		h = 0
-// 		s = 0
-// 	} else {
-// 		s = l > 0.5 ? difference / (2.0 - max - min) : difference / (max + min)
-// 		switch (max) {
-// 			case r:
-// 				h = (g - b) / difference + (g < b ? 6 : 0)
-// 				break
-// 			case g:
-// 				h = 2.0 + (b - r) / difference
-// 				break
-// 			case b:
-// 				h = 4.0 + (r - g) / difference
-// 				break
-// 		}
-// 		h = Math.round(h * 60)
-// 	}
-// 	s = Math.round(s * 100)
-// 	l = Math.round(l * 100)
-// 	return { h, s, l }
-// }
-
-// function bin2rgba(data) {
-// 	const rgbas = []
-// 	for (let i = 0, l = data.length; i < l; i++) {
-// 		if (i % 4 === 0) {
-// 			rgbas.push({ r: data[i] })
-// 		} else {
-// 			const rgba = rgbas[rgbas.length - 1]
-// 			if (i % 4 === 1) {
-// 				rgba.g = data[i]
-// 			} else if (i % 4 === 2) {
-// 				rgba.b = data[i]
-// 			} else if (i % 4 === 3) {
-// 				rgba.a = data[i]
-// 			}
-// 		}
-// 	}
-// 	return rgbas
-// }
-
 function AliOSSPlugin(accessType) {
 	this.mediaInfoReader = null
 	this.mediaInfoInstance = null
+	this.screenshotLoading = false
 	this.bucketAccessType = accessType
 }
 
@@ -174,10 +99,72 @@ AliOSSPlugin.prototype = {
 	 * @returns {Promise}
 	 */
 	async getMediaInfo(fileObj, onProgress) {
-		let result = await (
-			await createMediaInfoInstance(this)
-		).analyzeData(createMediaInfoGetSize(this, fileObj), createMediaInfoReadChunk(this, fileObj, onProgress))
+		let instance = await createMediaInfoInstance(this)
+		let result = await instance.analyzeData(
+			createMediaInfoGetSize(this, fileObj),
+			createMediaInfoReadChunk(this, fileObj, onProgress)
+		)
 		return result.media ? result.media.track : null
+	},
+	/**
+	 * 获取视频截图
+	 *
+	 * @param {File} fileObj
+	 * @param {Number} currentTime
+	 * @returns
+	 */
+	getVideoScreenshot(fileObj, currentTime) {
+		return new Promise((resolve, reject) => {
+			if (this.screenshotLoading) return reject(new Error('screenshot loading.'))
+
+			let src = null
+			if (typeof window.createObjectURL !== 'undefined') src = window.createObjectURL(fileObj)
+			else if (typeof window.URL !== 'undefined') src = window.URL.createObjectURL(fileObj)
+			else if (typeof window.webkitURL !== 'undefined') src = window.webkitURL.createObjectURL(fileObj)
+			else return reject(new Error('Invalid file.'))
+
+			this.screenshotLoading = true
+
+			let canPlay = false
+
+			let video = document.createElement('video')
+			video.src = src
+			video.muted = 'muted'
+			video.autoplay = 'autoplay'
+			video.currentTime = currentTime
+			video.crossOrigin = 'anonymous'
+
+			video.addEventListener('error', (error) => {
+				reject(error)
+				this.screenshotLoading = false
+				video = null
+			})
+
+			video.addEventListener('canplay', () => {
+				if (canPlay) return
+				canPlay = true
+				setTimeout(screenshot, 16.7)
+			})
+
+			const screenshot = () => {
+				if (video.readyState < 2) {
+					console.log('video screenshot...')
+					setTimeout(screenshot, 16.7)
+				} else {
+					const canvas = document.createElement('canvas')
+					canvas.width = video.videoWidth
+					canvas.height = video.videoHeight
+					const context = canvas.getContext('2d')
+					context.drawImage(video, 0, 0, canvas.width, canvas.height)
+					let data = canvas.toDataURL('image/jpg').split(',').pop()
+					let name = fileObj.name.split('.')
+					name.pop()
+					resolve(new File([base64js.toByteArray(data)], name.join('.') + '.jpg', { mime: 'image/jpg' }))
+					this.screenshotLoading = false
+					video = null
+				}
+			}
+		})
 	},
 	/**
 	 * 是否为媒体文件（视频，音频）
