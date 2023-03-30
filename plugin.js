@@ -111,9 +111,11 @@ AliOSSPlugin.prototype = {
 	 *
 	 * @param {File} fileObj
 	 * @param {Number} currentTime
+	 * @param {Number} width
+	 * @param {Number} height
 	 * @returns
 	 */
-	getVideoScreenshot(fileObj, currentTime) {
+	getVideoScreenshot(fileObj, currentTime, width, height) {
 		return new Promise((resolve, reject) => {
 			if (this.screenshotLoading) return reject(new Error('screenshot loading.'))
 
@@ -131,11 +133,12 @@ AliOSSPlugin.prototype = {
 			video.src = src
 			video.muted = 'muted'
 			video.autoplay = 'autoplay'
-			video.currentTime = currentTime
 			video.crossOrigin = 'anonymous'
+			video.currentTime = currentTime
+			video.style.width = width + 'px'
 
-			video.addEventListener('error', (error) => {
-				reject(error)
+			video.addEventListener('error', () => {
+				reject(video.error)
 				this.screenshotLoading = false
 				video = null
 			})
@@ -148,12 +151,14 @@ AliOSSPlugin.prototype = {
 
 			const screenshot = () => {
 				if (video.readyState < 2) {
-					console.log('video screenshot...')
+					console.log('nuxt-ali-oss: video screenshot...')
 					setTimeout(screenshot, 16.7)
 				} else {
 					const canvas = document.createElement('canvas')
-					canvas.width = video.videoWidth
-					canvas.height = video.videoHeight
+					const erHeight = width * (video.videoHeight / video.videoWidth)
+					canvas.width = width
+					canvas.height = erHeight
+					if (erHeight != height) console.warn(`nuxt-ali-oss: Screenshot not proportional, got: ${height}, actual: ${erHeight}`)
 					const context = canvas.getContext('2d')
 					context.drawImage(video, 0, 0, canvas.width, canvas.height)
 					let data = canvas.toDataURL('image/jpg').split(',').pop()

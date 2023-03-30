@@ -1,6 +1,6 @@
 {
 	"name": "nuxt-ali-oss",
-	"version": "1.0.3",
+	"version": "1.0.32",
 	"description": "Nuxt JS ali-oss module~",
 	"main": "module.js",
 	"repository": {
