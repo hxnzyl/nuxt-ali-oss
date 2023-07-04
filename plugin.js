@@ -4,12 +4,12 @@ import mime from 'mime'
 
 import crypto from 'ali-oss/shims/crypto/crypto'
 import { Buffer } from 'buffer'
-import { resolve as resolvePath } from 'path'
+// import { resolve as resolvePath } from 'path'
 
 import base64js from 'base64-js'
 
 // import MediaInfoFactory from 'mediainfo.js'
-import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg/dist/ffmpeg.min.js'
+// import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg'
 
 const pluginOptions = JSON.parse('<%= JSON.stringify(options) %>')
 
@@ -79,7 +79,7 @@ function createFFmpegInstance(aliossInstance) {
 	if (aliossInstance.ffmpegInstance) return Promise.resolve()
 	// const { protocol, host } = window.location
 	// corePath: `${protocol}//${host}/ffmpeg-core.js`,
-	aliossInstance.ffmpegInstance = createFFmpeg({ log: true })
+	aliossInstance.ffmpegInstance = FFmpeg.createFFmpeg({ log: true })
 	return aliossInstance.ffmpegInstance.load()
 }
 
@@ -110,7 +110,7 @@ AliOSSPlugin.prototype = {
 	},
 	/**
 	 * 获取媒体文件信息
-	 * 由于mediainfo.js在nuxt中引入较为麻烦，因为请在局部或全局导入mediainfo.min.js
+	 * 由于 mediainfo.js 在nuxt中引入较为麻烦，因为请在局部或全局导入 mediainfo.min.js
 	 *
 	 * @param {File} fileObj 文件对象
 	 * @param {Function} onProgress 进度
@@ -126,6 +126,7 @@ AliOSSPlugin.prototype = {
 	},
 	/**
 	 * 获取视频截图
+	 * 由于 @ffmpeg/ffmpeg 在nuxt中引入较为麻烦，因为请在局部或全局导入 ffmpeg.min.js
 	 *
 	 * @param {File} fileObj
 	 * @param {Number} currentTime
@@ -182,7 +183,7 @@ AliOSSPlugin.prototype = {
 					onMessage('ffmpeg-loading')
 					await createFFmpegInstance(this)
 					onMessage('ffmpeg-fetching')
-					const fetchRes = await fetchFile(fileObj)
+					const fetchRes = await FFmpeg.fetchFile(fileObj)
 					this.ffmpegInstance.FS('writeFile', `input.${fileExt}`, fetchRes)
 					this.ffmpegInstance.setProgress((progress) => onMessage('ffmpeg-running', progress))
 					await this.ffmpegInstance.run(
