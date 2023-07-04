@@ -4,10 +4,12 @@ import mime from 'mime'
 
 import crypto from 'ali-oss/shims/crypto/crypto'
 import { Buffer } from 'buffer'
+import { resolve as resolvePath } from 'path'
 
 import base64js from 'base64-js'
 
 // import MediaInfoFactory from 'mediainfo.js'
+import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg/dist/ffmpeg.min.js'
 
 const pluginOptions = JSON.parse('<%= JSON.stringify(options) %>')
 
@@ -73,8 +75,24 @@ function createMediaInfoReadChunk(aliossInstance, fileObj, onProgress) {
 		})
 }
 
+function createFFmpegInstance(aliossInstance) {
+	if (aliossInstance.ffmpegInstance) return Promise.resolve()
+	// const { protocol, host } = window.location
+	// corePath: `${protocol}//${host}/ffmpeg-core.js`,
+	aliossInstance.ffmpegInstance = createFFmpeg({ log: true })
+	return aliossInstance.ffmpegInstance.load()
+}
+
+function unlinkFFmpegInstance(aliossInstance) {
+	if (aliossInstance.ffmpegInstance) {
+		aliossInstance.ffmpegInstance.FS('unlink', 'input.mp4')
+		aliossInstance.ffmpegInstance.FS('unlink', 'output.jpg')
+	}
+}
+
 function AliOSSPlugin(accessType) {
 	this.mediaInfoReader = null
+	this.ffmpegInstance = null
 	this.mediaInfoInstance = null
 	this.screenshotLoading = false
 	this.bucketAccessType = accessType
@@ -113,9 +131,10 @@ AliOSSPlugin.prototype = {
 	 * @param {Number} currentTime
 	 * @param {Number} width
 	 * @param {Number} height
+	 * @param {Function} onMessage
 	 * @returns
 	 */
-	getVideoScreenshot(fileObj, currentTime, width, height) {
+	getVideoScreenshot(fileObj, currentTime, width, height, onMessage) {
 		return new Promise((resolve, reject) => {
 			if (this.screenshotLoading) return reject(new Error('screenshot loading.'))
 
@@ -129,6 +148,10 @@ AliOSSPlugin.prototype = {
 
 			let canPlay = false
 
+			let fileName = fileObj.name.split('.')
+			let fileExt = fileName.pop()
+			fileName = fileName.join('.')
+
 			let video = document.createElement('video')
 			video.src = src
 			video.muted = 'muted'
@@ -137,23 +160,70 @@ AliOSSPlugin.prototype = {
 			video.currentTime = currentTime
 			video.style.width = width + 'px'
 
-			video.addEventListener('error', () => {
-				reject(video.error)
+			//onMessage
+			if (!onMessage) onMessage = (action, progress) => console.log(action, progress)
+
+			const success = (blob) => {
+				resolve(new File([blob], fileName + '.jpg', { mime: 'image/jpg' }))
+				unlinkFFmpegInstance(this)
 				this.screenshotLoading = false
 				video = null
+			}
+
+			const failure = (error) => {
+				reject([error, video.error])
+				unlinkFFmpegInstance(this)
+				this.screenshotLoading = false
+				video = null
+			}
+
+			video.addEventListener('error', async () => {
+				try {
+					onMessage('ffmpeg-loading')
+					await createFFmpegInstance(this)
+					onMessage('ffmpeg-fetching')
+					const fetchRes = await fetchFile(fileObj)
+					this.ffmpegInstance.FS('writeFile', `input.${fileExt}`, fetchRes)
+					this.ffmpegInstance.setProgress((progress) => onMessage('ffmpeg-running', progress))
+					await this.ffmpegInstance.run(
+						'-y', //覆盖已有文件
+						'-i', //指定输入文件名
+						`input.${fileExt}`,
+						'-ss', //从指定的时间(s)开始
+						'00:00:' + Math.min(currentTime, 59),
+						'-s', //设置分辨率
+						`${width}x${height}`,
+						'-f', //指定格式
+						'image2',
+						'-vf', //设置转换多少桢的视频
+						`fps=fps=1,showinfo`,
+						'-frames:v', //单张图片
+						'1',
+						'-an', //取消音频
+						'output.jpg'
+					)
+					onMessage('ffmpeg-reading')
+					const data = this.ffmpegInstance.FS('readFile', 'output.jpg')
+					if (data && data.buffer) success(new Blob([data.buffer], { type: 'image/jpg' }))
+					else failure(new Error('Not found output.jpg'))
+				} catch (error) {
+					failure(error)
+				}
 			})
 
 			video.addEventListener('canplay', () => {
 				if (canPlay) return
 				canPlay = true
-				setTimeout(screenshot, 16.7)
+				setTimeout(screenshot, 1000 / 60)
 			})
 
 			const screenshot = () => {
 				if (video.readyState < 2) {
 					console.log('nuxt-ali-oss: video screenshot...')
-					setTimeout(screenshot, 16.7)
+					onMessage('video-loading')
+					setTimeout(screenshot, 1000 / 60)
 				} else {
+					onMessage('video-reading')
 					const canvas = document.createElement('canvas')
 					const erHeight = width * (video.videoHeight / video.videoWidth)
 					canvas.width = width
@@ -162,11 +232,7 @@ AliOSSPlugin.prototype = {
 					const context = canvas.getContext('2d')
 					context.drawImage(video, 0, 0, canvas.width, canvas.height)
 					let data = canvas.toDataURL('image/jpg').split(',').pop()
-					let name = fileObj.name.split('.')
-					name.pop()
-					resolve(new File([base64js.toByteArray(data)], name.join('.') + '.jpg', { mime: 'image/jpg' }))
-					this.screenshotLoading = false
-					video = null
+					success(base64js.toByteArray(data))
 				}
 			}
 		})
@@ -225,6 +291,8 @@ AliOSSPlugin.prototype = {
 		if (this.mediaInfoReader) this.mediaInfoReader.abort(), (this.mediaInfoReader = null)
 		//关闭获取文件信息任务
 		if (this.mediaInfoInstance) this.mediaInfoInstance.close(), (this.mediaInfoInstance = null)
+		//中断ffmpeg
+		if (this.ffmpegInstance) this.ffmpegInstance.exit(), (this.ffmpegInstance = null)
 		//取消所有任务
 		this.cancel()
 	},

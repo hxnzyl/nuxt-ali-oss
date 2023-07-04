@@ -1,6 +1,6 @@
 {
 	"name": "nuxt-ali-oss",
-	"version": "1.0.32",
+	"version": "1.0.4",
 	"description": "Nuxt JS ali-oss module~",
 	"main": "module.js",
 	"repository": {
@@ -17,6 +17,8 @@
 	},
 	"homepage": "https://github.com/hxnzyl/nuxt-ali-oss#readme",
 	"dependencies": {
+		"@ffmpeg/core": "^0.10.0",
+		"@ffmpeg/ffmpeg": "^0.10.1",
 		"ali-oss": "^6.17.1",
 		"consola": "^2.15.3",
 		"defu": "^6.1.2"
