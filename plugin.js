@@ -83,10 +83,13 @@ function createFFmpegInstance(aliossInstance) {
 	return aliossInstance.ffmpegInstance.load()
 }
 
-function unlinkFFmpegInstance(aliossInstance) {
+function unlinkFFmpegInstance(aliossInstance, fileExtension) {
 	if (aliossInstance.ffmpegInstance) {
-		aliossInstance.ffmpegInstance.FS('unlink', 'input.mp4')
-		aliossInstance.ffmpegInstance.FS('unlink', 'output.jpg')
+		try {
+			aliossInstance.ffmpegInstance.FS('unlink', 'input.' + fileExtension)
+			aliossInstance.ffmpegInstance.FS('unlink', 'output.jpg')
+			aliossInstance.ffmpegInstance.exit()
+		} catch (e) {}
 	}
 }
 
@@ -165,15 +168,15 @@ AliOSSPlugin.prototype = {
 			if (!onMessage) onMessage = (action, progress) => console.log(action, progress)
 
 			const success = (blob) => {
-				resolve(new File([blob], fileName + '.jpg', { mime: 'image/jpg' }))
-				unlinkFFmpegInstance(this)
+				unlinkFFmpegInstance(this, fileExt)
 				this.screenshotLoading = false
 				video = null
+				resolve(new File([blob], fileName + '.jpg', { mime: 'image/jpg' }))
 			}
 
 			const failure = (error) => {
+				unlinkFFmpegInstance(this, fileExt)
 				reject([error, video.error])
-				unlinkFFmpegInstance(this)
 				this.screenshotLoading = false
 				video = null
 			}
