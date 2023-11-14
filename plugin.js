@@ -89,6 +89,7 @@ function unlinkFFmpegInstance(aliossInstance, fileExtension) {
 			aliossInstance.ffmpegInstance.FS('unlink', 'input.' + fileExtension)
 			aliossInstance.ffmpegInstance.FS('unlink', 'output.jpg')
 			aliossInstance.ffmpegInstance.exit()
+			aliossInstance.ffmpegInstance = null
 		} catch (e) {}
 	}
 }
@@ -237,6 +238,7 @@ AliOSSPlugin.prototype = {
 					context.drawImage(video, 0, 0, canvas.width, canvas.height)
 					let data = canvas.toDataURL('image/jpg').split(',').pop()
 					success(base64js.toByteArray(data))
+					canvas = null
 				}
 			}
 		})
@@ -333,7 +335,8 @@ AliOSSPlugin.prototype = {
 		let path = combineFileDirectory(filePath, fileObj)
 		let opts = combineUploadOptions(this.bucketAccessType, options)
 		// console.log('####multipartUpload', this.options, opts)
-		return await this._multipartUpload(path, fileObj, opts)
+		await this._multipartUpload(path, fileObj, opts)
+		return this.options.domain + path
 	}
 }
 
